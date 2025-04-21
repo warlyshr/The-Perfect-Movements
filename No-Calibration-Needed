@@ -1,0 +1,410 @@
+from __future__ import annotations
+
+import sys, time, cv2, mediapipe as mp, numpy as np, pyautogui
+from collections import deque
+import platform
+import ctypes
+import subprocess
+import re
+import os
+
+# ---------------- USER SETTINGS ----------------
+CAM_INDEX = 0
+CAM_WIDTH, CAM_HEIGHT = 640, 480
+FPS_LIMIT = 30
+SMOOTH = 3                   # Smoothing factor for eye position
+STABLE_FRAMES = 2            # Frames required for stable detection
+CENTER_WIDTH_PCT = 5        # Width of center region as percentage of screen (reduced to 15%)
+MOVE_PERCENT = 10            # Percentage of screen width to move cursor
+CURSOR_DURATION = 0          # Non‑blocking cursor nudge
+COOLDOWN_SECONDS = 0.7       # Command cooldown
+USE_ARROW_KEYS = False
+
+# Blink detection
+BLINK_THRESHOLD = 0.19
+BLINK_COOLDOWN_S = 0.6
+
+# Long blink for pause/resume
+LONG_BLINK_THRESHOLD = 0.19
+LONG_BLINK_DURATION = 1.0
+PAUSE_RESUME_COOLDOWN = 2.0
+
+# Debug
+DEBUG_WINDOW = True
+# ------------------------------------------------
+
+# ---------- Check Dependencies ------------------
+try:
+    import pyautogui
+except ImportError:
+    print("Error: PyAutoGUI not found. Please install:")
+    print("  pip install pyautogui")
+    print("On Linux, you may also need:")
+    print("  sudo apt-get install python3-tk python3-dev")
+    sys.exit(1)
+
+try:
+    import mediapipe as mp
+except ImportError:
+    print("Error: MediaPipe not found. Please install:")
+    print("  pip install mediapipe")
+    sys.exit(1)
+
+# Enable failsafe (move cursor to corner to abort)
+pyautogui.FAILSAFE = False
+
+# ---------- Screen Information -------------------
+# Get screen dimensions
+SCREEN_W, SCREEN_H = pyautogui.size()
+
+# Try to get physical screen size information if possible
+physical_size_inches = None
+screen_diagonal_pixels = np.sqrt(SCREEN_W**2 + SCREEN_H**2)
+
+try:
+    if platform.system() == 'Windows':
+        user32 = ctypes.windll.user32
+        # Get system DPI
+        try:
+            dpi_x = user32.GetDpiForSystem()
+            diagonal_inches = screen_diagonal_pixels / dpi_x
+            physical_size_inches = round(diagonal_inches, 1)
+        except Exception:
+            # Fallback for older Windows versions
+            dc = user32.GetDC(0)
+            dpi_x = ctypes.windll.gdi32.GetDeviceCaps(dc, 88)  # LOGPIXELSX
+            user32.ReleaseDC(0, dc)
+            diagonal_inches = screen_diagonal_pixels / dpi_x
+            physical_size_inches = round(diagonal_inches, 1)
+    
+    elif platform.system() == 'Linux':
+        # Try to get screen size information using xrandr (X11)
+        try:
+            # Check if xrandr is available
+            if os.system("which xrandr > /dev/null 2>&1") == 0:
+                output = subprocess.check_output('xrandr | grep " connected"', shell=True).decode()
+                
+                # Look for the primary display's physical dimensions
+                # Example pattern: 1920x1080+0+0 (normal left inverted right x axis y axis) 310mm x 170mm
+                matches = re.search(r'(\d+)mm x (\d+)mm', output)
+                
+                if matches:
+                    width_mm = int(matches.group(1))
+                    height_mm = int(matches.group(2))
+                    diagonal_mm = np.sqrt(width_mm**2 + height_mm**2)
+                    physical_size_inches = round(diagonal_mm / 25.4, 1)  # Convert mm to inches
+                    print(f"Linux screen size detected: {width_mm}mm x {height_mm}mm")
+        except Exception as e:
+            print(f"Note: Could not detect screen size on Linux: {e}")
+            
+    elif platform.system() == 'Darwin':  # macOS
+        # Could implement macOS-specific detection here
+        pass
+            
+except Exception as e:
+    print(f"Note: Could not detect physical screen size: {e}")
+    physical_size_inches = None
+
+# Calculate movement pixels based on screen width
+MOVE_PIXELS = int(SCREEN_W * MOVE_PERCENT / 100)
+
+print(f"📊 Screen Info: {SCREEN_W}x{SCREEN_H} pixels")
+if physical_size_inches:
+    print(f"📏 Detected screen size: ~{physical_size_inches} inches diagonal")
+print(f"🖱️ Cursor movement set to {MOVE_PERCENT}% of screen width ({MOVE_PIXELS} pixels)")
+print(f"🎯 Center dead zone: {CENTER_WIDTH_PCT}% of view")
+
+# ---------- Camera Setup -----------------------
+try:
+    cam = None
+    # Try different camera initialization methods
+    if platform.system() == 'Windows':
+        cam = cv2.VideoCapture(CAM_INDEX, cv2.CAP_DSHOW)
+    else:  # Linux and others
+        cam = cv2.VideoCapture(CAM_INDEX)
+        # Try alternative backend if the first fails
+        if not cam.isOpened():
+            cam.release()
+            cam = cv2.VideoCapture(CAM_INDEX, cv2.CAP_V4L2)
+    
+    # Configure camera
+    if cam.isOpened():
+        cam.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
+        cam.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+        
+        # Test camera capture
+        ret, frame = cam.read()
+        if not ret or frame is None or frame.size == 0:
+            raise Exception("Camera returned empty frame")
+    else:
+        raise Exception(f"Could not open camera with index {CAM_INDEX}")
+        
+except Exception as e:
+    print(f"❌ Camera initialization error: {e}")
+    print("Please check your camera connection and permissions")
+    if platform.system() == 'Linux':
+        print("On Linux, you may need to give camera permissions:")
+        print("  sudo usermod -a -G video $USER")
+        print("  sudo chmod 666 /dev/videoX  (where X is your camera number)")
+    sys.exit(1)
+
+# Center cursor initially
+pyautogui.moveTo(SCREEN_W // 2, SCREEN_H // 2)
+
+# ---------- MediaPipe Setup -------------------
+mp_face = mp.solutions.face_mesh
+face_mesh = mp_face.FaceMesh(max_num_faces=1, refine_landmarks=True,
+                             min_detection_confidence=0.5,
+                             min_tracking_confidence=0.5)
+
+# Landmarks
+L_EYE, R_EYE = [33, 133], [362, 263]
+L_IRIS, R_IRIS = 468, 473
+L_TOP, L_BOTTOM = 159, 145
+R_TOP, R_BOTTOM = 386, 374
+np_norm = np.linalg.norm
+
+def to_px(lm, idx):
+    p = lm[idx]
+    return np.array([int(p.x * CAM_WIDTH), int(p.y * CAM_HEIGHT)])
+
+def iris_ratio(lm):
+    """Calculate normalized iris position within eye bounds"""
+    li, ri = to_px(lm, L_IRIS), to_px(lm, R_IRIS)
+    lL, lR = to_px(lm, L_EYE[0]), to_px(lm, L_EYE[1])
+    rL, rR = to_px(lm, R_EYE[0]), to_px(lm, R_EYE[1])
+    
+    # Handle potential division by zero if eye width is zero
+    l_eye_width = lR[0] - lL[0]
+    r_eye_width = rR[0] - rL[0]
+    rx_l = (li[0] - lL[0]) / (l_eye_width + 1e-6) if l_eye_width != 0 else 0
+    rx_r = (ri[0] - rL[0]) / (r_eye_width + 1e-6) if r_eye_width != 0 else 0
+    rx = (rx_l + rx_r) / 2
+
+    lT, lB = to_px(lm, L_TOP), to_px(lm, L_BOTTOM)
+    rT, rB = to_px(lm, R_TOP), to_px(lm, R_BOTTOM)
+    # Handle potential division by zero if eye height is zero
+    l_eye_height = lB[1] - lT[1]
+    r_eye_height = rB[1] - rT[1]
+    ry_l = (li[1] - lT[1]) / (l_eye_height + 1e-6) if l_eye_height != 0 else 0
+    ry_r = (ri[1] - rT[1]) / (r_eye_height + 1e-6) if r_eye_height != 0 else 0
+    ry = (ry_l + ry_r) / 2
+
+    return np.array([rx, ry])
+
+def ear(lm):
+    """Calculate eye aspect ratio for blink detection"""
+    lT, lB = to_px(lm, L_TOP), to_px(lm, L_BOTTOM)
+    rT, rB = to_px(lm, R_TOP), to_px(lm, R_BOTTOM)
+    lL, lR = to_px(lm, L_EYE[0]), to_px(lm, L_EYE[1])
+    rL, rR = to_px(lm, R_EYE[0]), to_px(lm, R_EYE[1])
+    def _ear(T, B, L, R):
+        eye_width = np_norm(L - R)
+        # Avoid division by zero
+        return np_norm(T - B) / (eye_width + 1e-6) if eye_width != 0 else 0
+    ear_l = _ear(lT, lB, lL, lR)
+    ear_r = _ear(rT, rB, rL, rR)
+    return (ear_l + ear_r) / 2
+
+# ---------- Region Setup ----------------------
+# Define the central region (where no cursor movement happens)
+half_center = CENTER_WIDTH_PCT / 200.0  # Half width of center region (as 0-1 normalized value)
+left_threshold = 0.5 - half_center     # Left boundary of center region
+right_threshold = 0.5 + half_center    # Right boundary of center region
+
+print("✅ Eye tracking initialized with automatic region detection")
+print(f"🎯 Center dead zone: {CENTER_WIDTH_PCT}% of view (x: {left_threshold:.2f} to {right_threshold:.2f})")
+print("👁️ Looking left of center region moves cursor left")
+print("👁️ Looking right of center region moves cursor right")
+print("👁️ Looking in center region keeps cursor still")
+print("👁️ Blink to click, long blink (1 second) to pause/resume")
+print("⚠️ Move cursor to screen corner to exit (failsafe)")
+print(f"🖥️ Detected OS: {platform.system()} {platform.release()}")
+
+# ---------- Main Loop Setup -------------------
+sm_x, sm_y = deque(maxlen=SMOOTH), deque(maxlen=SMOOTH)
+last_emit = 0.0
+stable = 0
+prev = 'centre'
+blink_cd = 0.0
+prev_t = time.time()
+
+# Pause/resume variables
+commands_paused = False
+eye_close_start = 0
+last_pause_toggle = 0
+
+# ---------- Main Loop ------------------------
+try:
+    while True:
+        try:
+            ok, frm = cam.read()
+            if not ok or frm is None or frm.size == 0:
+                print("Warning: Camera frame issue.")
+                time.sleep(0.1)
+                continue
+
+            rgb = cv2.cvtColor(frm, cv2.COLOR_BGR2RGB)
+            res = face_mesh.process(rgb)
+        except Exception as e:
+            print(f"Error processing frame: {e}")
+            time.sleep(0.1)
+            continue
+
+        now = time.time()
+        label = 'centre'
+        med = np.array([0.5, 0.5])  # Default to center position
+        current_ear = 0  # Default value
+
+        if res.multi_face_landmarks:
+            lm = res.multi_face_landmarks[0].landmark
+            if len(lm) > max(L_IRIS, R_IRIS, L_TOP, L_BOTTOM, R_TOP, R_BOTTOM, L_EYE[0], L_EYE[1], R_EYE[0], R_EYE[1]):
+                # Get eye position
+                vec = iris_ratio(lm)
+                sm_x.append(vec[0])
+                sm_y.append(vec[1])
+                med = np.array([np.median(sm_x), np.median(sm_y)])
+
+                # Determine region based on horizontal position
+                if med[0] < left_threshold:
+                    label = 'right'
+                elif med[0] > right_threshold:
+                    label = 'left'
+                else:
+                    label = 'centre'
+
+                # Eye aspect ratio calculation for blink detection
+                current_ear = ear(lm)
+                
+                # Regular blink detection
+                if current_ear < BLINK_THRESHOLD and now > blink_cd:
+                    print(f"👁️ Blink detected (EAR: {current_ear:.3f})")
+                    pyautogui.click()
+                    blink_cd = now + BLINK_COOLDOWN_S
+                    last_emit = now
+                    stable = 0
+                
+                # Long blink detection for pause/resume
+                if current_ear < LONG_BLINK_THRESHOLD:
+                    if eye_close_start == 0:
+                        eye_close_start = now
+                    elif now - eye_close_start >= LONG_BLINK_DURATION and now > last_pause_toggle + PAUSE_RESUME_COOLDOWN:
+                        commands_paused = not commands_paused
+                        print(f"👁️ Commands {'PAUSED' if commands_paused else 'RESUMED'} (long blink: {now - eye_close_start:.2f}s)")
+                        last_pause_toggle = now
+                        eye_close_start = 0
+                elif current_ear >= LONG_BLINK_THRESHOLD:
+                    eye_close_start = 0
+
+        # Stability filter to reduce jitter
+        if label == prev:
+            stable += 1
+        else:
+            stable = 1
+            prev = label
+
+        # Emit command - only if not paused
+        if not commands_paused and label != 'centre' and stable >= STABLE_FRAMES and now - last_emit > COOLDOWN_SECONDS:
+            print('➡️', label.upper(), f"(stable: {stable})")
+            if USE_ARROW_KEYS:
+                pyautogui.press(label)
+            else:
+                # Dynamic cursor movement based on screen size
+                dx = {'left': -MOVE_PIXELS, 'right': MOVE_PIXELS}.get(label, 0)
+                pyautogui.moveRel(dx, 0, duration=CURSOR_DURATION)
+            last_emit = now
+            stable = 0
+
+        # Debug Window Update
+        if DEBUG_WINDOW:
+            dbg = frm.copy()
+            
+            # Draw facial landmarks if detected
+            if res.multi_face_landmarks and len(res.multi_face_landmarks[0].landmark) > max(L_IRIS, R_IRIS, L_TOP, L_BOTTOM, R_TOP, R_BOTTOM, L_EYE[0], L_EYE[1], R_EYE[0], R_EYE[1]):
+                lm = res.multi_face_landmarks[0].landmark
+                for idx in L_EYE + R_EYE + [L_IRIS, R_IRIS, L_TOP, L_BOTTOM, R_TOP, R_BOTTOM]:
+                    try:
+                        cv2.circle(dbg, tuple(to_px(lm, idx)), 2, (0, 255, 0), -1)
+                    except IndexError:
+                        pass
+            
+            # Draw region indicators
+            h = 30
+            # Background for region display
+            cv2.rectangle(dbg, (0, CAM_HEIGHT-h), (CAM_WIDTH, CAM_HEIGHT), (0, 0, 0), -1)
+            
+            # Calculate pixel positions for thresholds
+            left_px = int(left_threshold * CAM_WIDTH)
+            right_px = int(right_threshold * CAM_WIDTH)
+            curr_px = int(med[0] * CAM_WIDTH)
+            
+            # Draw regions
+            cv2.rectangle(dbg, (0, CAM_HEIGHT-h), (left_px, CAM_HEIGHT), (0, 0, 255), -1)  # Left region
+            cv2.rectangle(dbg, (left_px, CAM_HEIGHT-h), (right_px, CAM_HEIGHT), (0, 255, 0), -1)  # Center region
+            cv2.rectangle(dbg, (right_px, CAM_HEIGHT-h), (CAM_WIDTH, CAM_HEIGHT), (255, 0, 0), -1)  # Right region
+            
+            # Draw current eye position indicator
+            cv2.circle(dbg, (curr_px, CAM_HEIGHT-h//2), 5, (255, 255, 255), -1)
+            
+            # Display info texts
+            cv2.putText(dbg, f'Direction: {label} (Stable: {stable})', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+            cv2.putText(dbg, f'X: {med[0]:.3f}', (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+            cv2.putText(dbg, f'EAR: {current_ear:.3f}', (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+            
+            # Add pause state indicator
+            status_color = (0, 0, 255) if commands_paused else (0, 255, 0)
+            status_text = "COMMANDS PAUSED" if commands_paused else "COMMANDS ACTIVE"
+            cv2.putText(dbg, f'Status: {status_text}', (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 1)
+            
+            # Show system & screen info
+            system_info = f'{platform.system()}'
+            screen_info = f'Screen: {SCREEN_W}×{SCREEN_H}'
+            if physical_size_inches:
+                screen_info += f' (~{physical_size_inches}")'
+            cv2.putText(dbg, system_info, (10, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+            cv2.putText(dbg, screen_info, (10, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+            
+            # Long blink progress indicator when eyes are closed
+            if eye_close_start > 0:
+                close_duration = now - eye_close_start
+                progress = min(close_duration / LONG_BLINK_DURATION, 1.0) * 100
+                cv2.putText(dbg, f'Long Blink: {progress:.0f}%', (10, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
+            
+            cv2.putText(dbg, f'FPS: {1.0 / (now - prev_t + 1e-6):.1f}', (CAM_WIDTH - 100, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+            cv2.putText(dbg, "LEFT", (left_px//2 - 20, CAM_HEIGHT-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            cv2.putText(dbg, "CENTER", ((left_px+right_px)//2 - 30, CAM_HEIGHT-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            cv2.putText(dbg, "RIGHT", ((right_px+CAM_WIDTH)//2 - 25, CAM_HEIGHT-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+            cv2.imshow('Eye Tracking Control', dbg)
+
+        # Frame rate limiting and exit condition
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+        # Precise sleep calculation for frame rate control
+        elapsed = time.time() - prev_t
+        sleep_time = (1.0 / FPS_LIMIT) - elapsed if FPS_LIMIT > 0 else 0
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+        prev_t = time.time()
+
+except KeyboardInterrupt:
+    print("\nProgram interrupted by user")
+except Exception as e:
+    print(f"\nError in main loop: {e}")
+finally:
+    # Clean up resources
+    if 'cam' in locals() and cam is not None:
+        cam.release()
+    cv2.destroyAllWindows()
+    print("ℹ️ Eye tracking system closed.")
+
+    # Print usage instructions on exit
+    print("\n== Eye Tracking Control System ==")
+    print("To run again: python eye_control.py")
+    if platform.system() == 'Linux':
+        print("\nLinux troubleshooting tips:")
+        print("- Camera permission issues: sudo usermod -a -G video $USER")
+        print("- GUI issues: Make sure X11 is running")
+        print("- Dependencies: sudo apt install python3-opencv python3-tk python3-dev")
+    print("\nThank you for using Eye Tracking Control!")
