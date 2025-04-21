@@ -2,6 +2,9 @@
 
 A lightweight and real-time eye-gesture control system built using OpenCV, MediaPipe, and Python. This project allows users to control the mouse cursor and perform click actions with eye movements and blinks. It’s designed for responsiveness and accuracy with low-latency input.
 
+## IMP:
+If you need calibration and more accuracy and most convenience choose "Pupil-Tracker.py" but if you dont want calibration and let the system handle everything you have to choose "No-Calibration-Needed" file its less convenient but perfectly does the job 
+
 ###  Features
 
 -  **Eye movement detection**: Control left and right movements of the cursor using eye gestures.
