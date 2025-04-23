@@ -40,10 +40,10 @@ python main.py
 
 
 #### 4. Customize Settings:
-You can adjust various settings in the script, including camera resolution, blink thresholds, and movement speed by editing the USER SETTINGS section of the script.
+You can adjust various settings in the script, including camera resolution (larger the size of resolution more processing power is required), blink thresholds, and movement speed (how many pixels you want to move across the screen after one cursor movements) by editing the USER SETTINGS section of the script.
 
 ### Notes
-- Press Q to quit the application at any time.
+- Press Q to quit the application at any time or CTRL+C in case "Q" other technical problem arises.
 
 - The script expects a working webcam and proper lighting for best performance.
 
